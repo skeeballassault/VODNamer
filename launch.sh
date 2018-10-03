@@ -1,4 +1,7 @@
-#!/bin/bash
+if (( ${BASH_VERSINFO[0]} < 4 )); then
+	echo "This script requires Bash version >= 4.";
+	exit 1;
+fi
 
 # Get directory of script itself
 CURR_DIR="$(cd "$(dirname $0)" && pwd)"
@@ -102,7 +105,7 @@ while getopts "f:l:dxrh" opt; do
 		r )
 			FORCE_REGEN=yes
 		;;
-		h ) 
+		h )
 			echo "Available arguments:"
 			echo "-f	Folder to scan for video files (input required)"
 			echo "-l	Link to tournament, can be any link from a Smash.gg tournament page (input required)"
@@ -142,11 +145,11 @@ if [[ "$unamestr" == 'Linux' ]]; then
 	if dep_check ffmpeg feh bc; then
 		preview_mode=true
 	fi
-elif [[ "$unamestr" == 'FreeBSD' ]]; then
+elif [[ "$unamestr" == 'FreeBSD' || "$unamestr" == 'Darwin' ]]; then
 	platform='Mac OS X/FreeBSD'
 	jq="$CURR_DIR/jq/jq-osx-amd64"
 	# Dependencies for Mac
-	if dep_check ffmpeg feh bc; then
+	if dep_check ffmpeg bc; then
 		preview_mode=true
 	fi
 fi
@@ -339,7 +342,7 @@ for i in "${JSON_phase_groups[@]}"; do
 		entrants["$id"]=$gamerTag
 		entrants_lc_name2id["$(echo $gamerTag | awk '{print tolower($0)}')"]=$id
 	done <<< "$(echo $i | $jq -r '.entities.entrants[] | [.id, .mutations.participants[].gamerTag] | @tsv')"
- 
+
 	while IFS=$'\t' read -r id phaseGroupId entrant1PrereqType entrant2PrereqType entrant1Id entrant2Id midRoundText; do
 		if [ -n "$entrant1Id" ] && [ -n "$entrant2Id" ] && [ "$entrant1PrereqType" != "bye" ] && [ "$entrant2PrereqType" != "bye" ]; then # the first two checks clear sets with null entrant values (needed for non-existent Grands 2 sets) and the second two checks are for if the set was a bye
 			if [[ "$midRoundText" == Round\ [0-9]* ]]; then
@@ -392,12 +395,14 @@ for i in "${JSON_phase_groups[@]}"; do
 
 done
 
-for i in $(seq 0 $((${#pools_id[@]} - 1))); do
-	set_id+=("${pools_id[$i]}")
-	set_player1+=("${pools_player1[$i]}")
-	set_player2+=("${pools_player2[$i]}")
-	set_round+=("${pools_round[$i]}")
-done
+if [ ${#pools_id[@]} -ne 0 ]; then
+	for i in $(seq 0 $((${#pools_id[@]} - 1))); do
+		set_id+=("${pools_id[$i]}")
+		set_player1+=("${pools_player1[$i]}")
+		set_player2+=("${pools_player2[$i]}")
+		set_round+=("${pools_round[$i]}")
+	done
+fi
 
 for i in $(seq 0 $((${#winners_id[@]} - 1))); do
 	set_id+=("${winners_id[$i]}")
@@ -434,8 +439,16 @@ while true; do
 done
 
 shopt -s extglob nullglob
+
+# TODO - Setting IFS allows for filenames with spaces, but breaks multiple character input
+
+IFS=$'\n'
 for video in $video_folder/*.@(mp4|mov|flv|mkv); do
-	
+
+	unset IFS
+
+	debug "$video"
+
 	filename=$(basename "$video")
 	extension="${filename##*.}"
 	basename="${filename%.*}"
@@ -443,13 +456,14 @@ for video in $video_folder/*.@(mp4|mov|flv|mkv); do
 	# Preview mode - FFMpeg pulls a few random frames from the video at hand and shows them to the script runner to allow easy viewing of which players are present
 
 	if [ "$preview_mode" = true ]; then
-		mkdir -p $video_folder/previews
+		mkdir -p "$video_folder/previews"
 		if [[ ! -f "$video_folder/previews/PREVIEW-$basename.png" || -v FORCE_REGEN ]]; then
 			if [[ -v FORCE_REGEN ]]; then
 				echo -e "${L_BLUE}Force regenerating${GREEN} preview for ${basename}...${NC}"
 			else
 				echo -e "${GREEN}Generating preview for ${basename}...${NC}"
 			fi
+
 			duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video")
 
 			video_length_1percent=$(bc <<< "scale = 3;$duration / 100")
@@ -479,10 +493,18 @@ for video in $video_folder/*.@(mp4|mov|flv|mkv); do
 
 	# Accept input for one player's name, then give selector for every set they played to choose the appropriate set
 
-	# TODO - add Mac/Linux sensitivity for image viewing (find program for mac, maybe preview or quicklook, or feh if there's a good mac version)
 	if [[ $preview_mode == true ]]; then
-		feh -g 1024x768 "$video_folder/previews/PREVIEW-$basename.png" &
-		feh_pid=$!
+		case $platform in
+			"Linux")
+				feh -g 1024x768 "$video_folder/previews/PREVIEW-$basename.png" &
+				preview_pid=$!
+				;;
+			"Mac OS X/FreeBSD")
+				# TODO - make preview appear smaller/less in the way
+				qlmanage -p "$video_folder/previews/PREVIEW-$basename.png" >& /dev/null &
+				preview_pid=$!
+				;;
+			esac
 	fi
 
 	while true; do
@@ -729,9 +751,12 @@ for video in $video_folder/*.@(mp4|mov|flv|mkv); do
 
 				fi
 			done
-			
+
 			echo -e "${GREEN}$title_full${NC}"
-			mv $video "$video_folder/$title_full.$extension"
+
+			debug "$video $video_folder/$title_full.$extension"
+
+			mv "$video" "$video_folder/$title_full.$extension"
 
 			break
 		elif [[ "$search_input" == "!list" ]]; then
@@ -746,7 +771,7 @@ for video in $video_folder/*.@(mp4|mov|flv|mkv); do
 	done
 
 	if [[ $preview_mode == true ]]; then
-		kill $feh_pid
+		kill $preview_pid
 	fi
 
 done

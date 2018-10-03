@@ -1,5 +1,12 @@
 # VODNamer
-A bash script designed to name a folder of SSBM VODs based on a given Smash.gg link
+A Bash 4 script designed to name a folder of SSBM VODs based on a given Smash.gg link
+
+Dependencies:
+
+Bash 4 (or greater)
+FFMPEG with Freetype enabled
+BC
+Feh (if on Linux)
 
 Available arguments:
 -f	Folder to scan for video files (input required)
